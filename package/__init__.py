@@ -1,1 +1,0 @@
-from package.module import example_function
