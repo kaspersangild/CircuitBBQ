@@ -1,0 +1,5 @@
+name: package_name
+
+dependencies:
+  - python=3
+  - sphinx
