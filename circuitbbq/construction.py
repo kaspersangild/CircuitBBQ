@@ -1,4 +1,5 @@
 import networkx as nx
+import sympy as sym
 from circuitbbq.analysis import CircuitAnalyzer
 
 EC_KEY = "EC"
@@ -9,23 +10,64 @@ BIAS_FLUX_KEY = "bias_flux"
 BIAS_VOLTAGE_KEY = "bias_voltage"
 ACTIVE_PARAMETER_KEYS = (BIAS_FLUX_KEY, BIAS_VOLTAGE_KEY)
 
-def _check_edge_params(**kwargs):
-    keys = set(kwargs.keys())
-    if keys.isdisjoint(PASSIVE_PARAMETER_KEYS):
-        raise ValueError(
-            "Must specify atleast one passive parameter. Possible choices are {}".format(
-                PASSIVE_PARAMETER_KEYS
-            )
-        )
-    all_keys = set(PASSIVE_PARAMETER_KEYS + ACTIVE_PARAMETER_KEYS)
-    if not keys.issubset(all_keys):
-        raise ValueError(
-            "Unknown edge attribute(s): {}. Possible attributes are: {}".format(
-                keys - all_keys, all_keys
-            )
-        )
+class EdgeAttributeManager:
+    EC_KEY = "EC"
+    EL_KEY = "EL"
+    EJ_KEY = "EJ"
+    CAP_KEY = "C"
+    IND_KEY = "L"
+    PASSIVE_PARAMETER_KEYS = (EC_KEY, EL_KEY, EJ_KEY)
+    BIAS_FLUX_KEY = "bias_flux"
+    BIAS_VOLTAGE_KEY = "bias_voltage"
+    ACTIVE_PARAMETER_KEYS = (BIAS_FLUX_KEY, BIAS_VOLTAGE_KEY)
+
+    def capacitance_to_charging_energy(self, expr):
+        return 1 / (2 * sym.sympify(expr))
+    
+    def charging_energy_to_capacitance(self, expr):
+        return self.capacitance_to_charging_energy(expr)
+    
+    def inductance_to_inductive_energy(self, expr):
+        return self.capacitance_to_charging_energy(expr)
+    
+    def inductive_energy_to_inductance(self, expr):
+        return self.capacitance_to_charging_energy(expr)
+    
+    def check_edge_params(self, key):
+        pass
+        
 
 class CircuitBuilder:
+    def _check_edge_params(self, **kwargs):
+        keys = set(kwargs.keys())
+        man = EdgeAttributeManager()
+        PASSIVE_PARAMETER_KEYS = man.PASSIVE_PARAMETER_KEYS
+        ACTIVE_PARAMETER_KEYS = man.ACTIVE_PARAMETER_KEYS
+        if keys.isdisjoint(PASSIVE_PARAMETER_KEYS):
+            raise ValueError(
+                "Must specify atleast one passive parameter. Possible choices are {}".format(
+                    PASSIVE_PARAMETER_KEYS
+                )
+            )
+        all_keys = set(PASSIVE_PARAMETER_KEYS + ACTIVE_PARAMETER_KEYS)
+        if not keys.issubset(all_keys):
+            raise ValueError(
+                "Unknown edge attribute(s): {}. Possible attributes are: {}".format(
+                    keys - all_keys, all_keys
+                )
+            )
+    def _convert_attr(self, key, value):
+        man = EdgeAttributeManager()
+        if key == man.CAP_KEY:
+            return man.EC_KEY, man.capacitance_to_charging_energy(value)
+        return key, value
+    
+    def _sanitize_attrs(self, **attrs):
+        d = dict(self._convert_attr(k, attrs[k]) for k in attrs)
+        self._check_edge_params(**d)
+        return d
+            
+    
     def add_edge(self, u, v, **attr):
         """Add elements between the nodes u and v
         
@@ -48,22 +90,22 @@ class CircuitBuilder:
         v : node
             ending node
         """
-        _check_edge_params(**attr)
+        attr = self._sanitize_attrs(**attr)
         self.graph.add_edge(u, v, **attr)
 
     def add_cycle(self, nodes_for_cycle, **attr):
-        _check_edge_params(**attr)
+        attr = self._sanitize_attrs(**attr)
         nx.add_cycle(self.graph, nodes_for_cycle=nodes_for_cycle, **attr)
 
     def add_star(self, nodes_for_star, **attr):
-        _check_edge_params(**attr)
+        attr = self._sanitize_attrs(**attr)
         nx.add_star(self.graph, nodes_for_star=nodes_for_star, **attr)
 
     def add_path(self, nodes_for_path, **attr):
-        _check_edge_params(**attr)
+        attr = self._sanitize_attrs(**attr)
         nx.add_path(self.graph, nodes_for_path=nodes_for_path, **attr)
 
-    def analyzer(self, coord2nodes, nodelist=None, charging_matrix_symbol=None, xp_pairs=None):
+    def analyzer(self, coord2nodes=None, nodelist=None, charging_matrix_symbol=None, xp_pairs=None):
         """Construct CircuitAnalyzer instance
 
         The CircuitAnalyzer class implements a bunch of methods that are useful for circuit analysis.

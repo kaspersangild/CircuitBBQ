@@ -1,6 +1,6 @@
 import sympy as sym
 import networkx as nx
-from circuitbbq.construction import EC_KEY, EJ_KEY, EL_KEY, BIAS_FLUX_KEY, BIAS_VOLTAGE_KEY
+from circuitbbq.construction import EdgeAttributeManager
 from qiplib import BBQBasis, lincomb2tuple_collected
 
 class CircuitAnalyzer:
@@ -9,7 +9,7 @@ class CircuitAnalyzer:
         return self.coord2nodes.shape[1]
     
     def capacitance_matrix(self):
-        lap_cap = self.laplacian(name=EC_KEY, invert_weights=True) / 2  # E_C = 1 / (2 * C) in units where 2*e=1
+        lap_cap = self.laplacian(name=EdgeAttributeManager.EC_KEY, invert_weights=True) / 2  # E_C = 1 / (2 * C) in units where 2*e=1
         v = self.coord2nodes
         lap_cap = v.T @ lap_cap @ v
         return lap_cap
@@ -46,7 +46,7 @@ class CircuitAnalyzer:
     
     def edge_fluxes(self):
         x_vec = sym.Matrix(self.x)
-        flux_biases = self.attr_vector(name=BIAS_FLUX_KEY)
+        flux_biases = self.attr_vector(name=EdgeAttributeManager.BIAS_FLUX_KEY)
         B = self.incidence_matrix()
         return B.T @ x_vec + flux_biases
 
@@ -64,9 +64,9 @@ class CircuitAnalyzer:
     def momentum_bias(self):
         V = self.coord2nodes
         B = self.incidence_matrix()
-        d = self.attr_vector(EC_KEY, invert_weights=True) / 2
+        d = self.attr_vector(EdgeAttributeManager.EC_KEY, invert_weights=True) / 2
         D = sym.diag(d)
-        vg = self.attr_vector("bias_voltage")
+        vg = self.attr_vector(EdgeAttributeManager.BIAS_VOLTAGE_KEY)
         return V.T @ B @ D @ vg
 
     def hamiltonian(self) -> sym.Expr:
@@ -75,8 +75,8 @@ class CircuitAnalyzer:
     def potential(self, clean_expr=True):
         out = 0
         fluxes = self.edge_fluxes()
-        els = self.attr_vector(EL_KEY)
-        ejs = self.attr_vector(EJ_KEY)
+        els = self.attr_vector(EdgeAttributeManager.EL_KEY)
+        ejs = self.attr_vector(EdgeAttributeManager.EJ_KEY)
         for phi, el, ej in zip(fluxes, els, ejs):
             out += el * phi**2 / 2
             out -= ej * sym.cos(phi)
