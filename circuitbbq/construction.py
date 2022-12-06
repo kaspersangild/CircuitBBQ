@@ -1,40 +1,7 @@
 import networkx as nx
-import sympy as sym
-from circuitbbq.analysis import CircuitAnalyzer
+from circuitbbq.analysis import CircuitAnalyzer 
+from circuitbbq.utils import EdgeAttributeManager
 
-EC_KEY = "EC"
-EL_KEY = "EL"
-EJ_KEY = "EJ"
-PASSIVE_PARAMETER_KEYS = (EC_KEY, EL_KEY, EJ_KEY)
-BIAS_FLUX_KEY = "bias_flux"
-BIAS_VOLTAGE_KEY = "bias_voltage"
-ACTIVE_PARAMETER_KEYS = (BIAS_FLUX_KEY, BIAS_VOLTAGE_KEY)
-
-class EdgeAttributeManager:
-    EC_KEY = "EC"
-    EL_KEY = "EL"
-    EJ_KEY = "EJ"
-    CAP_KEY = "C"
-    IND_KEY = "L"
-    PASSIVE_PARAMETER_KEYS = (EC_KEY, EL_KEY, EJ_KEY)
-    BIAS_FLUX_KEY = "bias_flux"
-    BIAS_VOLTAGE_KEY = "bias_voltage"
-    ACTIVE_PARAMETER_KEYS = (BIAS_FLUX_KEY, BIAS_VOLTAGE_KEY)
-
-    def capacitance_to_charging_energy(self, expr):
-        return 1 / (2 * sym.sympify(expr))
-    
-    def charging_energy_to_capacitance(self, expr):
-        return self.capacitance_to_charging_energy(expr)
-    
-    def inductance_to_inductive_energy(self, expr):
-        return self.capacitance_to_charging_energy(expr)
-    
-    def inductive_energy_to_inductance(self, expr):
-        return self.capacitance_to_charging_energy(expr)
-    
-    def check_edge_params(self, key):
-        pass
         
 
 class CircuitBuilder:
@@ -60,6 +27,8 @@ class CircuitBuilder:
         man = EdgeAttributeManager()
         if key == man.CAP_KEY:
             return man.EC_KEY, man.capacitance_to_charging_energy(value)
+        if key == man.IND_KEY:
+            return man.EL_KEY, man.inductance_to_inductive_energy(value)
         return key, value
     
     def _sanitize_attrs(self, **attrs):
@@ -105,7 +74,7 @@ class CircuitBuilder:
         attr = self._sanitize_attrs(**attr)
         nx.add_path(self.graph, nodes_for_path=nodes_for_path, **attr)
 
-    def analyzer(self, coord2nodes=None, nodelist=None, charging_matrix_symbol=None, xp_pairs=None):
+    def analyzer(self) -> CircuitAnalyzer:
         """Construct CircuitAnalyzer instance
 
         The CircuitAnalyzer class implements a bunch of methods that are useful for circuit analysis.
@@ -127,13 +96,7 @@ class CircuitBuilder:
         CircuitAnalyzer
             CircuitAnalyzer object for the defined circuit.
         """
-        return CircuitAnalyzer(
-            self.graph.copy(),
-            coord2nodes=coord2nodes,
-            nodelist=nodelist,
-            charging_matrix_symbol=charging_matrix_symbol,
-            xp_pairs=xp_pairs
-        )
+        return CircuitAnalyzer(self.graph.copy())
 
     def __init__(self, graph: nx.Graph = None):
         if graph is None:

@@ -1,6 +1,6 @@
 import sympy as sym
 import networkx as nx
-from circuitbbq.construction import EdgeAttributeManager
+from circuitbbq.utils import EdgeAttributeManager
 from qiplib import BBQBasis, lincomb2tuple_collected
 
 class CircuitAnalyzer:
@@ -14,10 +14,33 @@ class CircuitAnalyzer:
         lap_cap = v.T @ lap_cap @ v
         return lap_cap
     
+    def set_coordinates(self, coord2nodes, nodelist=None, xp_pairs=None):
+        c2n = sym.Matrix(coord2nodes)
+        if c2n.shape[0] != self.graph.number_of_nodes():
+            raise ValueError("Invalid coordinates.")
+        else:
+            self.coord2nodes = c2n
+        self.nodelist = nodelist
+        if xp_pairs is None:
+            xs = sym.symbols("x:{}".format(self.ncoords))
+            ps = sym.symbols("p:{}".format(self.ncoords))
+            xp_pairs = tuple((x, p) for x, p in zip(xs, ps))
+        if len(xp_pairs) != self.ncoords:
+            raise ValueError("Invalid number of xp_pairs")
+        xp_pairs = tuple(xp_pairs)
+        self.xs = []
+        self.ps = []
+        for x, p in xp_pairs:
+            self.xs.append(sym.sympify(x))
+            self.ps.append(sym.sympify(p))
+        self.xs = tuple(self.xs)
+        self.ps = tuple(self.ps)
+            
+    
     def laplacian(self, name: str, invert_weights=False):
         B = self.incidence_matrix()
         d = self.attr_vector(name, invert_weights)
-        D = sym.diag(d)
+        D = sym.diag(*d)
         return B @ D @ B.T   
     
     def attr_vector(self, name: str, invert_weights=False):
@@ -35,7 +58,7 @@ class CircuitAnalyzer:
                     v.append(0)
             else:
                 v.append(x)
-        return sym.Matrix(v)
+        return sym.Matrix(v, real=True)
 
     def incidence_matrix(self):
         return sym.Matrix(
@@ -45,10 +68,10 @@ class CircuitAnalyzer:
         )
     
     def edge_fluxes(self):
-        x_vec = sym.Matrix(self.x)
+        x_vec = sym.Matrix(self.xs)
         flux_biases = self.attr_vector(name=EdgeAttributeManager.BIAS_FLUX_KEY)
         B = self.incidence_matrix()
-        return B.T @ x_vec + flux_biases
+        return B.T @ self.coord2nodes @ x_vec + flux_biases
 
     def kinetic(self, clean_expr=True, charging_matrix=None):
         if charging_matrix is None:
@@ -56,7 +79,7 @@ class CircuitAnalyzer:
         else:
             charging_matrix = sym.Matrix(charging_matrix)
         p = sym.Matrix(self.ps) - self.momentum_bias()
-        out = (self.p.T@charging_matrix@p)[0,0] / 2
+        out = (p.T@charging_matrix@p)[0,0] / 2
         if clean_expr:
             out = self.clean_expr(out)
         return out
@@ -65,12 +88,12 @@ class CircuitAnalyzer:
         V = self.coord2nodes
         B = self.incidence_matrix()
         d = self.attr_vector(EdgeAttributeManager.EC_KEY, invert_weights=True) / 2
-        D = sym.diag(d)
+        D = sym.diag(*d)
         vg = self.attr_vector(EdgeAttributeManager.BIAS_VOLTAGE_KEY)
         return V.T @ B @ D @ vg
 
-    def hamiltonian(self) -> sym.Expr:
-        return self.potential() + self.kinetic()
+    def hamiltonian(self, charging_matrix=None) -> sym.Expr:
+        return self.potential() + self.kinetic(charging_matrix=charging_matrix)
 
     def potential(self, clean_expr=True):
         out = 0
@@ -86,7 +109,7 @@ class CircuitAnalyzer:
     
     def clean_expr(self, expr):
         out = sym.expand(expr, trig=True)
-        return sum(lincomb2tuple_collected(out, self.basis_symbols))
+        return sum(a * b for a, b in lincomb2tuple_collected(out, self.basis_symbols) if b != 1)
 
     def length_scales(self):
         msinv = self.charging_matrix().diagonal()
@@ -99,7 +122,7 @@ class CircuitAnalyzer:
         return tuple(l)
 
     def charging_matrix(self):
-        return self.capacitance_matrix().pinv()
+        return self.capacitance_matrix().inv()
 
     def bbq_factory(self, coord_idx, sparse=False, atol=10**-12, bbq_strategy="x", dim=32, **strategy_kwargs):
         """Builds BBQBasis instance for specified coordinate.
@@ -170,29 +193,7 @@ class CircuitAnalyzer:
     def __init__(
         self,
         circuit_graph: nx.MultiDiGraph,
-        coord2nodes: sym.Matrix=None,
-        nodelist=None,
-        xp_pairs: tuple[sym.Symbol] = None,
     ):
         self.graph = circuit_graph
-        if coord2nodes is None:
-            coord2nodes = sym.eye(self.graph.number_of_nodes())
-        self.coord2nodes = sym.Matrix(coord2nodes)
-        self.nodelist = nodelist
-        if xp_pairs is None:
-            xs = sym.symbols("x:{}".format(self.ncoords))
-            ps = sym.symbols("p:{}".format(self.ncoords))
-            xp_pairs = tuple((x, p) for x, p in zip(xs, ps))
-        if len(xp_pairs) != self.ncoords:
-            raise ValueError("Invalid number of xp_pairs")
-        xp_pairs = tuple(xp_pairs)
-        self.xs = []
-        self.ps = []
-        for x, p in xp_pairs:
-            self.xs.append(sym.sympify(x))
-            self.ps.append(sym.sympify(p))
-        self.xs = tuple(self.xs)
-        self.ps = tuple(self.ps)
-        if charging_matrix_symbol is not None:
-            n = self.ncoords
-            charging_matrix_symbol = sym.MatrixSymbol(charging_matrix_symbol, n, n)
+        self.set_coordinates(sym.eye(self.graph.number_of_nodes()))
+
