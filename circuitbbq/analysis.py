@@ -124,7 +124,7 @@ class CircuitAnalyzer:
     def charging_matrix(self):
         return self.capacitance_matrix().inv()
 
-    def bbq_factory(self, coord_idx, sparse=False, atol=10**-12, bbq_strategy="x", dim=32, **strategy_kwargs):
+    def bbq_basis(self, coord_idx, sparse=False, atol=10**-12, bbq_strategy="x", dim=32, **strategy_kwargs):
         """Builds BBQBasis instance for specified coordinate.
         
         The BBQBasis constructs the matrix representation of symbolic expressions.
@@ -189,6 +189,14 @@ class CircuitAnalyzer:
     @property
     def basis_symbols(self):
         return self.xs + self.ps
+    
+    def eliminate_coordinate(self, expr, idx):
+        x = self.xs[idx]
+        p = self.ps[idx]
+        s = {x : 0, p : 0}
+        out = expr.subs(s)
+        return self.clean_expr(out)
+
         
     def __init__(
         self,
