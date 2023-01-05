@@ -3,8 +3,11 @@ from scipy import constants
 
 
 class CQEDUnits:
-    def charging_energy_from_farad(self, capacitance):
+    def capacitance_to_charging_energy(self, capacitance):
         return (2 * self.e)**2 / (2 * capacitance)
+    
+    def charging_energy_to_capacitance(self, charging_energy):
+        return (2 * self.e)**2 / (2 * charging_energy)
         
     
     def __init__(self, time_scale=1.0, temperature_scale=1.0):

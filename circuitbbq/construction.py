@@ -1,6 +1,6 @@
 import networkx as nx
 from circuitbbq.analysis import CircuitAnalyzer 
-from circuitbbq.utils import EdgeAttributeManager
+from circuitbbq.utils import EdgeAttributeManager, sympify_no_clash
 
         
 
@@ -61,6 +61,22 @@ class CircuitBuilder:
         """
         attr = self._sanitize_attrs(**attr)
         self.graph.add_edge(u, v, **attr)
+    
+    def add_resonator(self, ground_node, centerpin_node_label, omega_r, impedance, N_segments):
+        if centerpin_node_label in self.graph.nodes:
+            raise ValueError("centerpin_node_label should be a new node")
+        w = sympify_no_clash(omega_r) # 1/sqrt(LC)
+        z = sympify_no_clash(impedance) # sqrt(L/C)
+        l = z / w
+        c = 1 / (z * w)
+        nodes = [centerpin_node_label+"{}".format(idx) for idx in range(N_segments)]
+        for v in nodes:
+            self.add_edge(ground_node, v, C=c / N_segments)
+        
+        for v, u in zip(nodes[:-1], nodes[1:]):
+            self.add_edge(u, v, L=l / N_segments)
+            
+
 
     def add_cycle(self, nodes_for_cycle, **attr):
         attr = self._sanitize_attrs(**attr)
