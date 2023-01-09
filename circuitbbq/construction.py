@@ -44,7 +44,7 @@ class CircuitBuilder:
         
         To add a Josephson junction add EJ=<Josephson energy>
 
-        To add an inductor add EL=<Inductive energy, i.e. (2*pi*Phi_0)**2 / (2 * L), where \Phi_0 is the magnetic flux quantum>
+        To add an inductor add EL=<Inductive energy, i.e. (2*pi*Phi_0)**2 / L, where Phi_0 is the magnetic flux quantum>
 
         You can also add a bias flux or voltage to between the nodes through
         
