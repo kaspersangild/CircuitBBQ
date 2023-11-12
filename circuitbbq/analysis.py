@@ -1,31 +1,35 @@
 import sympy as sym
 import networkx as nx
 from circuitbbq.utils import EdgeAttributeManager, sympify_no_clash
-from qiplib import BBQBasis, lincomb2tuple_collected
+from circuitbbq.bbq.builders import BBQBasis
+from circuitbbq.bbq.symutils import lincomb2tuple_collected
+
 
 class CircuitAnalyzer:
     @property
     def ncoords(self):
         return self.coord2nodes.shape[1]
-    
+
     def capacitance_matrix(self) -> sym.Matrix:
-        lap_cap = self.laplacian(name=EdgeAttributeManager.EC_KEY, invert_weights=True) / 2  # E_C = 1 / (2 * C) in units where 2*e=1
+        lap_cap = (
+            self.laplacian(name=EdgeAttributeManager.EC_KEY, invert_weights=True) / 2
+        )  # E_C = 1 / (2 * C) in units where 2*e=1
         v = self.coord2nodes
         lap_cap = v.T @ lap_cap @ v
         return lap_cap
-    
+
     def spring_matrix(self) -> sym.Matrix:
-        lap_L= self.laplacian(name=EdgeAttributeManager.EL_KEY)
-        lap_J= self.laplacian(name=EdgeAttributeManager.EJ_KEY)
+        lap_L = self.laplacian(name=EdgeAttributeManager.EL_KEY)
+        lap_J = self.laplacian(name=EdgeAttributeManager.EJ_KEY)
         return v.T @ (lap_L + lap_J) @ v
-    
+
     def mode_frequencies(self, charging_matrix=None):
         k = self.spring_matrix().diagonal()
         if charging_matrix is None:
             charging_matrix = self.charging_matrix()
         mi = charging_matrix.diagonal()
-        return (sym.sqrt(_mi/_k) for _mi, _k in zip(mi, k))
-    
+        return (sym.sqrt(_mi / _k) for _mi, _k in zip(mi, k))
+
     def set_coordinates(self, coord2nodes, nodelist=None, xp_pairs=None):
         c2n = sym.Matrix(coord2nodes)
         if c2n.shape[0] != self.graph.number_of_nodes():
@@ -47,14 +51,14 @@ class CircuitAnalyzer:
             self.ps.append(sympify_no_clash(p))
         self.xs = tuple(self.xs)
         self.ps = tuple(self.ps)
-            
-    
+        return self
+
     def laplacian(self, name: str, invert_weights=False) -> sym.Matrix:
         B = self.incidence_matrix()
         d = self.attr_vector(name, invert_weights)
         D = sym.diag(*d)
-        return B @ D @ B.T   
-    
+        return B @ D @ B.T
+
     def attr_vector(self, name: str, invert_weights=False):
         attrs = nx.get_edge_attributes(self.graph, name=name)
         v = []
@@ -78,7 +82,7 @@ class CircuitAnalyzer:
             .toarray()
             .astype(int)
         )
-    
+
     def edge_fluxes(self):
         x_vec = sym.Matrix(self.xs)
         flux_biases = self.attr_vector(name=EdgeAttributeManager.BIAS_FLUX_KEY)
@@ -91,11 +95,11 @@ class CircuitAnalyzer:
         else:
             charging_matrix = sym.Matrix(charging_matrix)
         p = sym.Matrix(self.ps) - self.momentum_bias()
-        out = (p.T@charging_matrix@p)[0,0] / 2
+        out = (p.T @ charging_matrix @ p)[0, 0] / 2
         if clean_expr:
             out = self.clean_expr(out)
         return out
-    
+
     def momentum_bias(self):
         V = self.coord2nodes
         B = self.incidence_matrix()
@@ -104,18 +108,25 @@ class CircuitAnalyzer:
         vg = self.attr_vector(EdgeAttributeManager.BIAS_VOLTAGE_KEY)
         return V.T @ B @ D @ vg
 
-    def hamiltonian(self, charging_matrix=None, rescale_coords=None, taylor_coords=None, taylor_order=4) -> sym.Expr:
+    def hamiltonian(
+        self,
+        charging_matrix=None,
+        rescale_coords=None,
+        taylor_coords=None,
+        taylor_order=4,
+    ) -> sym.Expr:
         out = self.potential() + self.kinetic(charging_matrix=charging_matrix)
         if taylor_coords is not None:
             out = self.taylor_expr(out, order=taylor_order, idxs=taylor_coords)
         if rescale_coords is not None:
-            subs = self.xp_scaled_subs(idxs=rescale_coords, charging_matrix=charging_matrix)
+            subs = self.xp_scaled_subs(
+                idxs=rescale_coords, charging_matrix=charging_matrix
+            )
             out = out.subs(subs)
         return out
-            
 
     def potential(self, clean_expr=True):
-        out = 0
+        out: sym.Expr = sym.sympify(0)
         fluxes = self.edge_fluxes()
         els = self.attr_vector(EdgeAttributeManager.EL_KEY)
         ejs = self.attr_vector(EdgeAttributeManager.EJ_KEY)
@@ -125,10 +136,12 @@ class CircuitAnalyzer:
         if clean_expr:
             out = self.clean_expr(out)
         return out
-    
+
     def clean_expr(self, expr):
         out = sym.expand(expr, trig=True)
-        return sum(a * b for a, b in lincomb2tuple_collected(out, self.basis_symbols) if b != 1)
+        return sum(
+            a * b for a, b in lincomb2tuple_collected(out, self.basis_symbols) if b != 1
+        )
 
     def length_scales(self, charging_matrix=None):
         if charging_matrix is None:
@@ -139,54 +152,52 @@ class CircuitAnalyzer:
         for x in self.xs:
             c = u.coeff(x, 2) * 2
             kinv.append(c**-1)
-        l = [(mi * ki)**sym.Rational(1, 4) for mi, ki in zip(msinv, kinv)]
+        l = [(mi * ki) ** sym.Rational(1, 4) for mi, ki in zip(msinv, kinv)]
         return tuple(l)
-    
+
     def flux_zpf(self, charging_matrix=None):
         ls = self.length_scales(charging_matrix=charging_matrix)
         return tuple(l * sym.sqrt(2) for l in ls)
-        
+
     def charge_zpf(self, charging_matrix=None):
         ls = self.length_scales(charging_matrix=charging_matrix)
         return tuple(l**-1 * sym.sqrt(2) for l in ls)
 
     def charging_matrix(self):
         return self.capacitance_matrix().inv()
-    
+
     def charging_matrix_perturbative_series(self, perturbation_symbols, order=1):
         perturbation_symbols = tuple(sympify_no_clash(perturbation_symbols))
         s = sym.Dummy("s")
-        subs = {x : s * x  for x in perturbation_symbols}
+        subs = {x: s * x for x in perturbation_symbols}
         cmat = self.capacitance_matrix().subs(subs)
-        c0 = cmat.subs({s : 0})
-        cx = (cmat-c0).subs({s : 1})
+        c0 = cmat.subs({s: 0})
+        cx = (cmat - c0).subs({s: 1})
         c0inv = c0.inv()
-        t = - cx @ c0inv
-        out = tuple([c0inv @ t**n for n in range(order+1)])
+        t = -cx @ c0inv
+        out = tuple([c0inv @ t**n for n in range(order + 1)])
         return out
-    
+
     def charging_matrix_perturbative(self, perturbation_symbols, order=1):
         out = None
-        for t in self.charging_matrix_perturbative_series(perturbation_symbols, order=order):
+        for t in self.charging_matrix_perturbative_series(
+            perturbation_symbols, order=order
+        ):
             if out is None:
                 out = t
             else:
                 out += t
         return out
 
-    def bbq_basis(self, coord_idx, sparse=False, atol=10**-12, bbq_strategy="x", dim=32, **strategy_kwargs):
+    def bbq_basis(self, coord_idx, bbq_strategy="x", dim=32, **strategy_kwargs):
         """Builds BBQBasis instance for specified coordinate.
-        
+
         The BBQBasis constructs the matrix representation of symbolic expressions.
-        
+
         Parameters
         ----------
         coord_idx : int
             Coordinate that the BBQBasis is tied to
-        sparse : bool, optional
-            Determines if the matrix representation is returned as a sparse array, by default False
-        atol : float, optional
-            Eliminates entries smaller that this value. Only relevant if sparse=True. By default 10**-12
         bbq_strategy : str, optional
             Specifies the quantization strategy. Default is position basis, i.e. bbq_strategy="x".
             The other options are "p" for momentum basis, and "ho" for harmonic oscillator basis.
@@ -201,23 +212,35 @@ class CircuitAnalyzer:
         BBQBasis
             Quantization basis for the specified coordinate.
         """
-        return BBQBasis(self.xs[coord_idx], self.ps[coord_idx], sparse=sparse, atol=atol, bbq_strategy=bbq_strategy, dim=dim, **strategy_kwargs)
-    
-    def ho_basis(self, coord_idx, sparse=False, atol=10**-12, dim=3, length_scale=1.0, order=6):
-        return self.bbq_basis(coord_idx=coord_idx, sparse=sparse, atol=atol, dim=dim, bbq_strategy="ho", length_scale=length_scale, order=order)
+        return BBQBasis(
+            self.xs[coord_idx],
+            self.ps[coord_idx],
+            bbq_strategy=bbq_strategy,
+            dim=dim,
+            **strategy_kwargs
+        )
 
-    def flux_basis(self, coord_idx, sparse=False, atol=10**-12, dim=32):
-        return self.bbq_basis(coord_idx=coord_idx, sparse=sparse, atol=atol, dim=dim, bbq_strategy="x")
+    def ho_basis(self, coord_idx, dim=3, length_scale=1.0, order=6):
+        return self.bbq_basis(
+            coord_idx=coord_idx,
+            dim=dim,
+            bbq_strategy="ho",
+            length_scale=length_scale,
+            order=order,
+        )
 
-    def charge_basis(self, coord_idx, sparse=False, atol=10**-12, dim=32):
-        return self.bbq_basis(coord_idx=coord_idx, sparse=sparse, atol=atol, dim=dim, bbq_strategy="p")
-    
+    def flux_basis(self, coord_idx, dim=32):
+        return self.bbq_basis(coord_idx=coord_idx, dim=dim, bbq_strategy="x")
+
+    def charge_basis(self, coord_idx, dim=32):
+        return self.bbq_basis(coord_idx=coord_idx, dim=dim, bbq_strategy="p")
+
     def xp_scaled(self, charging_matrix=None):
         ls = self.length_scales(charging_matrix=charging_matrix)
         x_scaled = tuple(x * l for x, l in zip(self.xs, ls))
         p_scaled = tuple(p / l for p, l in zip(self.ps, ls))
         return x_scaled, p_scaled
-    
+
     def xp_scaled_subs(self, idxs="all", charging_matrix=None):
         if idxs == "all":
             idxs = tuple(range(self.ncoords))
@@ -233,7 +256,7 @@ class CircuitAnalyzer:
             subs.append((x, x_scaled))
             subs.append((p, p_scaled))
         return subs
-    
+
     def taylor_expr(self, expr, order=6, idxs="all"):
         if idxs == "all":
             idxs = tuple(range(self.ncoords))
@@ -241,26 +264,24 @@ class CircuitAnalyzer:
             idxs = tuple(idxs)
         s = sym.Dummy()
         u = expr.subs([(x, s * x) for idx, x in enumerate(self.xs) if idx in idxs])
-        u = sym.series(u, s, n=order+1).removeO()
+        u = sym.series(u, s, n=order + 1).removeO()
         u = u.subs(s, 1)
         return u
-    
+
     @property
     def basis_symbols(self):
         return self.xs + self.ps
-    
+
     def eliminate_coordinate(self, expr, idx):
         x = self.xs[idx]
         p = self.ps[idx]
-        s = {x : 0, p : 0}
+        s = {x: 0, p: 0}
         out = expr.subs(s)
         return self.clean_expr(out)
 
-        
     def __init__(
         self,
         circuit_graph: nx.MultiDiGraph,
     ):
         self.graph = circuit_graph
         self.set_coordinates(sym.eye(self.graph.number_of_nodes()))
-
